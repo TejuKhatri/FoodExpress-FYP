@@ -1,10 +1,14 @@
 from django.contrib.auth import authenticate, get_user_model
 from django.views.decorators.csrf import csrf_exempt
+
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
 
 User = get_user_model()
+
+# Allowed roles (keep same everywhere)
+ALLOWED_ROLES = {"customer", "vendor", "delivery", "admin"}
 
 
 @csrf_exempt
@@ -13,7 +17,7 @@ def login_api(request):
     """
     Simple login API.
     Expects: { "username": "...", "password": "..." }
-    Returns basic user info if credentials are valid.
+    Returns: user info + role if credentials valid.
     """
     username = request.data.get("username")
     password = request.data.get("password")
@@ -26,21 +30,27 @@ def login_api(request):
 
     user = authenticate(username=username, password=password)
 
-    if user is not None:
+    if user is None:
         return Response(
-            {
-                "message": "Login successful",
-                "username": user.username,
-                "email": user.email,
-                "phone": getattr(user, "phone", None),
-                "role": getattr(user, "role", None),
-            },
-            status=status.HTTP_200_OK,
+            {"error": "Invalid username or password"},
+            status=status.HTTP_401_UNAUTHORIZED,
         )
 
+    # If you want admin role based on is_staff/is_superuser
+    role = getattr(user, "role", None)
+    if user.is_superuser or user.is_staff:
+        role = "admin"
+
     return Response(
-        {"error": "Invalid username or password"},
-        status=status.HTTP_401_UNAUTHORIZED,
+        {
+            "message": "Login successful",
+            "user_id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "phone": getattr(user, "phone", None),
+            "role": role,
+        },
+        status=status.HTTP_200_OK,
     )
 
 
@@ -53,25 +63,31 @@ def register_api(request):
       {
         "username": "...",
         "email": "...",
-        "phone": "...",     # optional but saved if provided
+        "phone": "...",
         "password": "...",
-        "role": "customer"  # optional, defaults to 'customer'
+        "role": "customer" | "vendor" | "delivery"
       }
     """
     username = request.data.get("username")
     email = request.data.get("email")
     phone = request.data.get("phone")
     password = request.data.get("password")
-    role = request.data.get("role", "customer")  # default role
+    role = request.data.get("role", "customer")
 
-    # basic required fields
     if not username or not email or not password:
         return Response(
             {"error": "username, email and password are required"},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # check duplicates
+    # Validate role
+    if role not in ALLOWED_ROLES:
+        role = "customer"
+
+    # (optional) prevent creating admin from register
+    if role == "admin":
+        role = "customer"
+
     if User.objects.filter(username=username).exists():
         return Response(
             {"error": "Username already exists"},
@@ -84,7 +100,6 @@ def register_api(request):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    # create user in Delivery_user table (custom user model)
     user = User.objects.create_user(
         username=username,
         email=email,
@@ -96,10 +111,11 @@ def register_api(request):
     return Response(
         {
             "message": "Account created",
+            "user_id": user.id,
             "username": user.username,
             "email": user.email,
-            "phone": user.phone,
-            "role": user.role,
+            "phone": getattr(user, "phone", None),
+            "role": getattr(user, "role", "customer"),
         },
         status=status.HTTP_201_CREATED,
     )

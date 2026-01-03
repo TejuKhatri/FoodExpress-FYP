@@ -8,6 +8,7 @@ class User(AbstractUser):
         ("customer", "Customer"),
         ("restaurant", "Restaurant"),
         ("delivery", "Delivery"),
+        ("admin", "Admin"),
     )
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default="customer")
 def __str__(self):
